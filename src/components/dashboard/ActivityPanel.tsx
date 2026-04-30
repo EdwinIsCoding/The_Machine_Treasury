@@ -5,6 +5,7 @@ import { ExternalLink } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
 import type { PaymentEvent, ComplianceEvent } from '@/lib/solana/types'
+import type { ProviderIntel } from '@/lib/specter/types'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -39,7 +40,21 @@ function relativeTime(ts: number): string {
 // Payment stream
 // ---------------------------------------------------------------------------
 
-function PaymentRow({ event, isNew }: { event: PaymentEvent; isNew: boolean }) {
+function reliabilityDot(score: number): string {
+  if (score >= 80) return '#22C55E'
+  if (score >= 50) return '#F59E0B'
+  return '#EF4444'
+}
+
+function PaymentRow({
+  event, isNew, providerIntel,
+}: {
+  event: PaymentEvent
+  isNew: boolean
+  providerIntel?: Record<string, ProviderIntel> | null
+}) {
+  const intel = providerIntel?.[event.provider]
+
   return (
     <div className={cn(
       'flex items-center gap-2.5 px-3 py-2.5 border-b border-[#1E2D3D] last:border-0',
@@ -56,27 +71,46 @@ function PaymentRow({ event, isNew }: { event: PaymentEvent; isNew: boolean }) {
         {formatLamports(event.lamports)}
       </span>
 
-      {/* Provider */}
-      <span className="text-[10px] font-mono text-[#64748B] truncate flex-1">
-        {truncate(event.provider, 5, 4)}
+      {/* Provider — enriched if Specter data available */}
+      <span className="text-[10px] font-mono text-[#64748B] truncate flex-1 flex items-center gap-1.5">
+        {intel ? (
+          <>
+            <span
+              className="h-1.5 w-1.5 rounded-full shrink-0"
+              style={{ background: reliabilityDot(intel.reliability_score) }}
+            />
+            {intel.display_name}
+          </>
+        ) : (
+          truncate(event.provider, 5, 4)
+        )}
       </span>
 
-      {/* Tx link */}
-      <a
-        href={`https://explorer.solana.com/tx/${event.signature}?cluster=devnet`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-[#334155] hover:text-[#64748B] transition-colors shrink-0"
-        aria-label="View transaction"
-        onClick={e => e.stopPropagation()}
-      >
-        <ExternalLink size={10} />
-      </a>
+      {/* Tx link — only shown for real Solana signatures (88 base58 chars) */}
+      {event.signature.length === 88 ? (
+        <a
+          href={`https://explorer.solana.com/tx/${event.signature}?cluster=devnet`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[#334155] hover:text-[#64748B] transition-colors shrink-0"
+          aria-label="View transaction"
+          onClick={e => e.stopPropagation()}
+        >
+          <ExternalLink size={10} />
+        </a>
+      ) : (
+        <span className="w-[10px] shrink-0" />
+      )}
     </div>
   )
 }
 
-function PaymentStream({ payments }: { payments: PaymentEvent[] }) {
+function PaymentStream({
+  payments, providerIntel,
+}: {
+  payments: PaymentEvent[]
+  providerIntel?: Record<string, ProviderIntel> | null
+}) {
   const [newIds, setNewIds] = useState<Set<string>>(new Set())
   const prevCountRef = useRef(payments.length)
 
@@ -114,6 +148,7 @@ function PaymentStream({ payments }: { payments: PaymentEvent[] }) {
               key={p.signature}
               event={p}
               isNew={newIds.has(p.signature)}
+              providerIntel={providerIntel}
             />
           ))
         )}
@@ -194,9 +229,10 @@ function ComplianceTable({ events }: { events: ComplianceEvent[] }) {
 interface ActivityPanelProps {
   payments: PaymentEvent[]
   compliance: ComplianceEvent[]
+  providerIntel?: Record<string, ProviderIntel> | null
 }
 
-export function ActivityPanel({ payments, compliance }: ActivityPanelProps) {
+export function ActivityPanel({ payments, compliance, providerIntel }: ActivityPanelProps) {
   return (
     <section className="flex flex-col gap-4 min-h-0 h-full">
       {/* Section label */}
@@ -206,7 +242,7 @@ export function ActivityPanel({ payments, compliance }: ActivityPanelProps) {
 
       {/* Payment stream — takes ~60% height */}
       <div className="flex flex-col flex-[3] min-h-0">
-        <PaymentStream payments={payments} />
+        <PaymentStream payments={payments} providerIntel={providerIntel} />
       </div>
 
       {/* Divider */}

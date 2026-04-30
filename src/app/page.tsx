@@ -8,6 +8,8 @@ import { Header } from '@/components/dashboard/Header'
 import { RiskScorePanel } from '@/components/dashboard/RiskScorePanel'
 import { TreasuryPanel } from '@/components/dashboard/TreasuryPanel'
 import { ActivityPanel } from '@/components/dashboard/ActivityPanel'
+import { SpecterPanel } from '@/components/dashboard/SpecterPanel'
+import { useSpecterIntel } from '@/hooks/useSpecterIntel'
 
 const WALLET_PUBKEY = process.env.NEXT_PUBLIC_HARDWARE_WALLET ?? ''
 
@@ -55,7 +57,10 @@ export default function DashboardPage() {
     refresh,
   } = useWalletStore()
 
-  const { analysis, isAnalyzing } = useTreasuryAnalysis()
+  const { providers: specterProviders, isLoading: specterLoading, source: specterSource } = useSpecterIntel()
+  const { analysis, scanResult, isAnalyzing, isStreaming, streamedSummary } = useTreasuryAnalysis({
+    providerIntel: specterProviders,
+  })
 
   // Compute risk score client-side from store data
   const riskReport = useMemo(() => {
@@ -84,6 +89,9 @@ export default function DashboardPage() {
         fetchedAt={fetchedAt}
         isLoading={isLoading}
         onRefresh={refresh}
+        isAnalyzing={isAnalyzing}
+        isStreaming={isStreaming}
+        lastScannedAt={scanResult?.scanned_at ?? null}
       />
 
       {/* 3-column layout */}
@@ -96,7 +104,18 @@ export default function DashboardPage() {
 
         {/* Centre — AI Treasury Analysis */}
         <CentreColumn>
-          <TreasuryPanel analysis={analysis} isAnalyzing={isAnalyzing} />
+          <TreasuryPanel
+            analysis={analysis}
+            isAnalyzing={isAnalyzing}
+            scanResult={scanResult}
+            isStreaming={isStreaming}
+            streamedSummary={streamedSummary}
+          />
+          <SpecterPanel
+            providers={specterProviders}
+            isLoading={specterLoading}
+            source={specterSource}
+          />
         </CentreColumn>
 
         {/* Right — Live Activity */}
@@ -104,6 +123,7 @@ export default function DashboardPage() {
           <ActivityPanel
             payments={paymentHistory}
             compliance={complianceHistory}
+            providerIntel={specterProviders}
           />
         </RightColumn>
       </div>

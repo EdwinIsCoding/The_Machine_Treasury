@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import type { PaymentEvent, ComplianceEvent } from '@/lib/solana/types'
+import type { ProviderIntel } from '@/lib/specter/types'
 import type {
   TreasuryAnalysis,
   RecommendedAction,
@@ -41,6 +42,7 @@ interface AnalyzeRequest {
   complianceHistory: ComplianceEvent[]
   balance: number   // lamports
   txCount: number
+  providerIntel?: Record<string, ProviderIntel>
 }
 
 // ---------------------------------------------------------------------------
@@ -49,8 +51,14 @@ interface AnalyzeRequest {
 
 const LAMPORTS_PER_SOL = 1_000_000_000
 
+const PROVIDER_MAP: Record<string, string> = {
+  'Hoh7fqnGfuvpHzMhVEoP5K8qfcuVNSGFnJoLTBMLbdYw': 'InferencePro',
+  'GPdnT3tRBm6RaMz1E4PKBYvY7RdtNvb1KEmRsLBJJrqA': 'ComputeHub',
+  '2noknFMELsRzWaFhpBrqJnxXmvZsQn1gGNmLuE5RL7E9': 'NeuralEdge',
+}
+
 function buildFinancialSummary(data: AnalyzeRequest): string {
-  const { paymentHistory, complianceHistory, balance, txCount } = data
+  const { paymentHistory, complianceHistory, balance, txCount, providerIntel } = data
   const now = Date.now()
   const MS = { hour: 3_600_000, day: 86_400_000, week: 7 * 86_400_000 }
 
@@ -115,6 +123,18 @@ COMPLIANCE EVENTS (last 7 days):
 
 RECENT CRITICAL EVENTS:
 ${criticalRecent || '  (none in last 7 days)'}
+${providerIntel && Object.keys(providerIntel).length > 0 ? `
+PROVIDER INTELLIGENCE (from Specter):
+${Object.entries(providerIntel)
+  .map(([pubkey, intel]) => {
+    const displayName = PROVIDER_MAP[pubkey] ?? intel.display_name
+    const funding = intel.funding_total_usd !== null
+      ? `$${(intel.funding_total_usd / 1_000_000).toFixed(0)}m raised`
+      : 'bootstrapped'
+    const rounds = intel.funding_rounds !== null ? `, ${intel.funding_rounds} rounds` : ''
+    return `  ${displayName} (${intel.specter_name}): ${funding}${rounds}, reliability ${intel.reliability_score}/100`
+  })
+  .join('\n')}` : ''}
 `.trim()
 }
 
@@ -199,6 +219,8 @@ function computeHeuristic(data: AnalyzeRequest): TreasuryAnalysis {
     summary: `The wallet is operating at ${burnRatePerHour.toFixed(0)} lamports/hour with a ${runwayStatus} runway of ${runwayHours.toFixed(0)} hours. ${recentCritical.length > 0 ? `${recentCritical.length} critical compliance event(s) in the last 24 hours require immediate attention.` : 'No critical compliance events in the last 24 hours.'}`,
     computed_at: Date.now(),
     source: 'heuristic',
+    model_used: 'heuristic',
+    latency_ms: 0,
   }
 }
 
@@ -242,10 +264,19 @@ async function callClaude(summary: string): Promise<TreasuryAnalysis | null> {
 
   const client = new Anthropic({ apiKey })
 
+  const t0 = Date.now()
+
   const message = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',  // fast + cheap for structured output
+    model: 'claude-sonnet-4-6',
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
+    // Prompt caching: cache the system prompt across calls (5-min TTL)
+    system: [
+      {
+        type: 'text',
+        text: SYSTEM_PROMPT,
+        cache_control: { type: 'ephemeral' },
+      },
+    ],
     messages: [
       {
         role: 'user',
@@ -253,6 +284,8 @@ async function callClaude(summary: string): Promise<TreasuryAnalysis | null> {
       },
     ],
   })
+
+  const latency_ms = Date.now() - t0
 
   const text = message.content
     .filter(b => b.type === 'text')
@@ -276,7 +309,7 @@ async function callClaude(summary: string): Promise<TreasuryAnalysis | null> {
     return null
   }
 
-  return { ...parsed, computed_at: Date.now(), source: 'claude' }
+  return { ...parsed, computed_at: Date.now(), source: 'claude', model_used: 'claude-sonnet-4-6', latency_ms }
 }
 
 // ---------------------------------------------------------------------------

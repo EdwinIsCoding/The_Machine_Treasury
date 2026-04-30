@@ -3,7 +3,7 @@
 import { Sparkles, Flame, Clock, PieChart as PieIcon } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { cn } from '@/lib/utils'
-import type { TreasuryAnalysis, RecommendedAction } from '@/lib/treasury/types'
+import type { TreasuryAnalysis, RecommendedAction, ScanResult } from '@/lib/treasury/types'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -169,34 +169,75 @@ function BudgetDonut({ inference, reserve, buffer }: { inference: number; reserv
 interface TreasuryPanelProps {
   analysis: TreasuryAnalysis | null
   isAnalyzing: boolean
+  scanResult?: ScanResult | null
+  isStreaming?: boolean
+  streamedSummary?: string
 }
 
-export function TreasuryPanel({ analysis, isAnalyzing }: TreasuryPanelProps) {
+export function TreasuryPanel({
+  analysis, isAnalyzing, scanResult, isStreaming, streamedSummary,
+}: TreasuryPanelProps) {
   const loading = isAnalyzing && !analysis
+
+  const scanSeverityColor = scanResult?.severity === 'critical'
+    ? 'bg-red-500/10 border-red-500/30 text-red-400'
+    : scanResult?.severity === 'alert'
+    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+    : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
 
   return (
     <section className="flex flex-col gap-4 fade-in min-w-0">
       {/* Panel header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="text-[10px] font-mono uppercase tracking-widest text-[#F59E0B]">
           AI Treasury Analysis
         </div>
-        {analysis && (
-          <span className={cn(
-            'text-[9px] font-mono px-2 py-0.5 rounded-full border',
-            analysis.source === 'claude'
-              ? 'bg-violet-500/10 border-violet-500/30 text-violet-400'
-              : 'bg-slate-500/10 border-slate-500/30 text-slate-400',
-          )}>
-            {analysis.source === 'claude' ? 'Claude AI' : 'Heuristic'}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Haiku scan badge */}
+          {scanResult && (
+            <span className={cn(
+              'text-[9px] font-mono px-2 py-0.5 rounded-full border tabular-nums',
+              scanSeverityColor,
+            )}>
+              Haiku scan{scanResult.scan_ms ? ` · ${scanResult.scan_ms}ms` : ''}
+            </span>
+          )}
+          {/* Sonnet / heuristic badge */}
+          {analysis && (
+            <span className={cn(
+              'text-[9px] font-mono px-2 py-0.5 rounded-full border',
+              analysis.source === 'claude'
+                ? 'bg-violet-500/10 border-violet-500/30 text-violet-400'
+                : 'bg-slate-500/10 border-slate-500/30 text-slate-400',
+            )}>
+              {analysis.source === 'claude'
+                ? `Sonnet 4.6${analysis.latency_ms ? ` · ${analysis.latency_ms}ms` : ''}`
+                : 'Heuristic'}
+            </span>
+          )}
+        </div>
       </div>
 
       {loading ? (
         <TreasurySkeleton />
       ) : analysis ? (
         <div className="flex flex-col gap-4 fade-in">
+
+          {/* Scan alert banner */}
+          {scanResult && (scanResult.severity === 'critical' || scanResult.severity === 'alert') && scanResult.alert && (
+            <div className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-lg border text-[11px] font-mono',
+              scanResult.severity === 'critical'
+                ? 'bg-red-500/10 border-red-500/30 text-red-300 critical-pulse'
+                : 'bg-amber-500/10 border-amber-500/30 text-amber-300',
+            )}>
+              <span className={cn(
+                'h-1.5 w-1.5 rounded-full shrink-0',
+                scanResult.severity === 'critical' ? 'bg-red-400 animate-pulse' : 'bg-amber-400 animate-pulse',
+              )} />
+              {scanResult.alert}
+            </div>
+          )}
 
           {/* AI summary */}
           <div className="p-4 rounded-lg border border-[#1E2D3D] bg-[#111827]">
@@ -205,9 +246,16 @@ export function TreasuryPanel({ analysis, isAnalyzing }: TreasuryPanelProps) {
               <span className="text-[10px] font-mono uppercase tracking-widest text-[#F59E0B]">
                 Treasury Summary
               </span>
+              {isStreaming && (
+                <span className="ml-auto text-[9px] font-mono text-violet-400 animate-pulse">
+                  streaming…
+                </span>
+              )}
             </div>
             <p className="text-[13px] text-[#CBD5E1] leading-relaxed">
-              {analysis.summary}
+              {isStreaming && streamedSummary
+                ? <>{streamedSummary}<span className="streaming-cursor">|</span></>
+                : analysis.summary}
             </p>
 
             {/* Anomaly flags */}

@@ -30,4 +30,14 @@ export interface TreasuryAnalysis {
   // Metadata (added server-side, not from Claude)
   computed_at: number                // Date.now()
   source: AnalysisSource
+  model_used?: string                // e.g. 'claude-sonnet-4-6' or 'heuristic'
+  latency_ms?: number                // Claude call latency
+}
+
+export interface ScanResult {
+  has_critical: boolean
+  alert: string | null
+  severity: 'none' | 'watch' | 'alert' | 'critical'
+  scan_ms?: number
+  scanned_at: number
 }

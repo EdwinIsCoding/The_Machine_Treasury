@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { Copy, Check, RefreshCw } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Copy, Check, RefreshCw, Code2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import type { DataSource } from '@/lib/data-source'
+import { BuildStoryModal } from '@/components/dashboard/BuildStoryModal'
 
 const LAMPORTS_PER_SOL = 1_000_000_000
 
@@ -14,10 +15,30 @@ interface HeaderProps {
   fetchedAt: number | null
   isLoading: boolean
   onRefresh: () => void
+  // Model activity (optional — P4.5)
+  isAnalyzing?: boolean
+  isStreaming?: boolean
+  lastScannedAt?: number | null
 }
 
-export function Header({ walletPubkey, balance, dataSource, fetchedAt, isLoading, onRefresh }: HeaderProps) {
+export function Header({
+  walletPubkey, balance, dataSource, fetchedAt, isLoading, onRefresh,
+  isAnalyzing, isStreaming, lastScannedAt,
+}: HeaderProps) {
   const [copied, setCopied] = useState(false)
+  const [scanSecondsAgo, setScanSecondsAgo] = useState<number | null>(null)
+  const [buildStoryOpen, setBuildStoryOpen] = useState(false)
+
+  // Update "Haiku Ns ago" every second
+  useEffect(() => {
+    if (!lastScannedAt) { setScanSecondsAgo(null); return }
+    const update = () => setScanSecondsAgo(Math.min(99, Math.floor((Date.now() - lastScannedAt) / 1000)))
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [lastScannedAt])
+
+  const aiActive = isAnalyzing || isStreaming
 
   const sol = (balance / LAMPORTS_PER_SOL).toFixed(4)
   const truncated = walletPubkey
@@ -103,6 +124,30 @@ export function Header({ walletPubkey, balance, dataSource, fetchedAt, isLoading
           </div>
         </div>
 
+        {/* AI model activity indicator */}
+        <div className="min-w-[64px] text-right">
+          {aiActive ? (
+            <div className="flex items-center justify-end gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
+              <span className="text-[9px] font-mono text-violet-400">AI</span>
+            </div>
+          ) : scanSecondsAgo !== null ? (
+            <span className="text-[9px] font-mono text-[#334155] tabular-nums">
+              Haiku {scanSecondsAgo}s
+            </span>
+          ) : null}
+        </div>
+
+        {/* Cursor build story button */}
+        <button
+          onClick={() => setBuildStoryOpen(true)}
+          aria-label="Built with Cursor"
+          title="Built with Cursor"
+          className="flex items-center justify-center h-7 w-7 rounded-md border border-[#334155] text-[#475569] hover:text-[#94A3B8] hover:border-[#475569] transition-colors cursor-pointer"
+        >
+          <Code2 size={13} />
+        </button>
+
         <button
           onClick={onRefresh}
           disabled={isLoading}
@@ -112,6 +157,8 @@ export function Header({ walletPubkey, balance, dataSource, fetchedAt, isLoading
           <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
         </button>
       </div>
+
+      <BuildStoryModal open={buildStoryOpen} onClose={() => setBuildStoryOpen(false)} />
     </header>
   )
 }
