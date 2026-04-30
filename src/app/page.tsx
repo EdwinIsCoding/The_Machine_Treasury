@@ -62,6 +62,22 @@ export default function DashboardPage() {
     providerIntel: specterProviders,
   })
 
+  // Compute provider spend concentration from payment history (links Auxin → Specter)
+  const spendByPubkey = useMemo(() => {
+    const totals: Record<string, number> = {}
+    let grandTotal = 0
+    for (const p of paymentHistory) {
+      totals[p.provider] = (totals[p.provider] ?? 0) + p.lamports
+      grandTotal += p.lamports
+    }
+    if (grandTotal === 0) return {}
+    const pct: Record<string, number> = {}
+    for (const [k, v] of Object.entries(totals)) {
+      pct[k] = Math.round((v / grandTotal) * 100)
+    }
+    return pct
+  }, [paymentHistory])
+
   // Compute risk score client-side from store data
   const riskReport = useMemo(() => {
     if (!paymentHistory.length && !complianceHistory.length) return null
@@ -115,6 +131,7 @@ export default function DashboardPage() {
             providers={specterProviders}
             isLoading={specterLoading}
             source={specterSource}
+            spendByPubkey={spendByPubkey}
           />
         </CentreColumn>
 

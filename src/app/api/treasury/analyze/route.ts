@@ -52,9 +52,9 @@ interface AnalyzeRequest {
 const LAMPORTS_PER_SOL = 1_000_000_000
 
 const PROVIDER_MAP: Record<string, string> = {
-  'Hoh7fqnGfuvpHzMhVEoP5K8qfcuVNSGFnJoLTBMLbdYw': 'InferencePro',
-  'GPdnT3tRBm6RaMz1E4PKBYvY7RdtNvb1KEmRsLBJJrqA': 'ComputeHub',
-  '2noknFMELsRzWaFhpBrqJnxXmvZsQn1gGNmLuE5RL7E9': 'NeuralEdge',
+  'Hoh7fqnGfuvpHzMhVEoP5K8qfcuVNSGFnJoLTBMLbdYw': 'Replicate',
+  'GPdnT3tRBm6RaMz1E4PKBYvY7RdtNvb1KEmRsLBJJrqA': 'Together AI',
+  '2noknFMELsRzWaFhpBrqJnxXmvZsQn1gGNmLuE5RL7E9': 'Perplexity',
 }
 
 function buildFinancialSummary(data: AnalyzeRequest): string {
@@ -268,7 +268,7 @@ async function callClaude(summary: string): Promise<TreasuryAnalysis | null> {
 
   const message = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 2048,
     // Prompt caching: cache the system prompt across calls (5-min TTL)
     system: [
       {
@@ -323,6 +323,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
+
+  // Defensive defaults — the client may omit these if wallet data hasn't loaded yet
+  body.paymentHistory = body.paymentHistory ?? []
+  body.complianceHistory = body.complianceHistory ?? []
 
   const { balance, txCount } = body
   const key = cacheKey(balance, txCount)

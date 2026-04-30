@@ -3,6 +3,27 @@ import { getConnection } from './connection'
 import type { PaymentEvent, ComplianceEvent } from './types'
 
 // ---------------------------------------------------------------------------
+// reason_code u16 → human-readable label
+// The on-chain ComplianceEvent stores reason_code as a u16 enum variant.
+// ---------------------------------------------------------------------------
+
+const REASON_CODE_MAP: Record<number, string> = {
+  0:  'SENSOR_NOMINAL',
+  1:  'HEALTH_CHECK_PASSED',
+  2:  'JOINT_TEMP_ELEVATED',
+  3:  'PAYLOAD_NEAR_LIMIT',
+  4:  'LATENCY_SPIKE',
+  5:  'SPEED_LIMIT_EXCEEDED',
+  6:  'THERMAL_WARNING',
+  7:  'FORCE_THRESHOLD',
+  8:  'EMERGENCY_STOP_TRIGGERED',
+  9:  'SAFETY_BOUNDARY_BREACH',
+  10: 'JOINT_CALIBRATED',
+  11: 'POWER_SUPPLY_LOW',
+  12: 'COMMUNICATION_TIMEOUT',
+}
+
+// ---------------------------------------------------------------------------
 // Anchor event discriminators — sha256("event:<Name>")[0:8]
 // Computed once and cached; uses the Web Crypto API (browser + Node 15+).
 // ---------------------------------------------------------------------------
@@ -57,6 +78,13 @@ class BorshReader {
     const lo = this.u32le()
     const hi = this.u32le() | 0  // reinterpret uint32 as int32
     return hi * 0x1_0000_0000 + lo
+  }
+
+  /** u16 little-endian */
+  u16(): number {
+    const v = this.buf[this.pos] | (this.buf[this.pos + 1] << 8)
+    this.pos += 2
+    return v >>> 0
   }
 
   private u32le(): number {
@@ -128,7 +156,8 @@ function parseLogLine(
       const agent = r.pubkey()
       const hash = r.string()
       const severity = r.u8() as 0 | 1 | 2 | 3
-      const reason_code = r.string()
+      const reason_code_num = r.u16()
+      const reason_code = REASON_CODE_MAP[reason_code_num] ?? `CODE_${reason_code_num}`
       const timestamp = r.i64() * 1000
       return { type: 'compliance', data: { agent, hash, severity, reason_code, timestamp } }
     } catch {
@@ -140,74 +169,80 @@ function parseLogLine(
 }
 
 // ---------------------------------------------------------------------------
-// Public fetch functions
+// Shared recent-events fetcher
+//
+// Fetches transactions SEQUENTIALLY (not batched) to avoid the 429 rate limit
+// on the public Solana devnet RPC. getParsedTransactions fires one HTTP request
+// per transaction even in "batch" mode — sequential individual getTransaction
+// calls are rate-limit-friendly and reliably succeed.
 // ---------------------------------------------------------------------------
 
-export async function fetchPaymentHistory(
-  walletPubkey: string,
-  limit = 100,
-): Promise<PaymentEvent[]> {
+const RECENT_TX_LIMIT = 5  // 5 sequential getTransaction calls ≈ 1.5s total
+
+interface RecentEvents {
+  payments: PaymentEvent[]
+  compliance: ComplianceEvent[]
+}
+
+export async function fetchRecentEvents(walletPubkey: string): Promise<RecentEvents> {
   const conn = getConnection()
   const pubkey = new PublicKey(walletPubkey)
   const discs = await getDiscriminators()
 
-  const sigInfos = await conn.getSignaturesForAddress(pubkey, { limit: limit * 3 })
-  const sigs = sigInfos.map(s => s.signature)
-
-  // Batch-fetch all transactions in a single RPC call
-  const txs = await conn.getParsedTransactions(sigs, {
-    maxSupportedTransactionVersion: 0,
+  // Single RPC call to get the most recent signatures
+  const sigInfos = await conn.getSignaturesForAddress(pubkey, {
+    limit: RECENT_TX_LIMIT,
   })
 
-  const events: PaymentEvent[] = []
+  const payments: PaymentEvent[] = []
+  const compliance: ComplianceEvent[] = []
 
-  for (let i = 0; i < txs.length && events.length < limit; i++) {
-    const tx = txs[i]
-    if (!tx?.meta?.logMessages) continue
+  // Fetch each transaction sequentially to stay within rate limits
+  for (let i = 0; i < sigInfos.length; i++) {
+    const sig = sigInfos[i].signature
+    try {
+      const tx = await conn.getParsedTransaction(sig, {
+        maxSupportedTransactionVersion: 0,
+      })
+      if (!tx?.meta?.logMessages) continue
 
-    for (const log of tx.meta.logMessages) {
-      const parsed = parseLogLine(log, discs)
-      if (parsed?.type === 'payment') {
-        events.push({ signature: sigs[i], slot: sigInfos[i].slot, ...parsed.data })
-        break // one payment event per transaction
+      for (const log of tx.meta.logMessages) {
+        const parsed = parseLogLine(log, discs)
+        if (parsed?.type === 'payment') {
+          payments.push({ signature: sig, slot: sigInfos[i].slot, ...parsed.data })
+          break
+        }
+        if (parsed?.type === 'compliance') {
+          compliance.push({ signature: sig, slot: sigInfos[i].slot, ...parsed.data })
+          break
+        }
       }
+    } catch {
+      // Skip individual transaction fetch errors — we still return what we got
     }
   }
 
-  return events.sort((a, b) => b.timestamp - a.timestamp)
+  return {
+    payments: payments.sort((a, b) => b.timestamp - a.timestamp),
+    compliance: compliance.sort((a, b) => b.timestamp - a.timestamp),
+  }
+}
+
+// Kept for backwards-compatibility with any direct callers
+export async function fetchPaymentHistory(
+  walletPubkey: string,
+  _limit = 100,
+): Promise<PaymentEvent[]> {
+  const { payments } = await fetchRecentEvents(walletPubkey)
+  return payments
 }
 
 export async function fetchComplianceHistory(
   walletPubkey: string,
-  limit = 50,
+  _limit = 50,
 ): Promise<ComplianceEvent[]> {
-  const conn = getConnection()
-  const pubkey = new PublicKey(walletPubkey)
-  const discs = await getDiscriminators()
-
-  const sigInfos = await conn.getSignaturesForAddress(pubkey, { limit: 1000 })
-  const sigs = sigInfos.map(s => s.signature)
-
-  const txs = await conn.getParsedTransactions(sigs, {
-    maxSupportedTransactionVersion: 0,
-  })
-
-  const events: ComplianceEvent[] = []
-
-  for (let i = 0; i < txs.length && events.length < limit; i++) {
-    const tx = txs[i]
-    if (!tx?.meta?.logMessages) continue
-
-    for (const log of tx.meta.logMessages) {
-      const parsed = parseLogLine(log, discs)
-      if (parsed?.type === 'compliance') {
-        events.push({ signature: sigs[i], slot: sigInfos[i].slot, ...parsed.data })
-        break
-      }
-    }
-  }
-
-  return events.sort((a, b) => b.timestamp - a.timestamp)
+  const { compliance } = await fetchRecentEvents(walletPubkey)
+  return compliance
 }
 
 export async function fetchWalletBalance(walletPubkey: string): Promise<number> {

@@ -15,9 +15,9 @@ import { computeReliability } from '@/lib/specter/types'
 // ---------------------------------------------------------------------------
 
 const PROVIDER_MAP: Record<string, { displayName: string; specterQuery: string }> = {
-  'Hoh7fqnGfuvpHzMhVEoP5K8qfcuVNSGFnJoLTBMLbdYw': { displayName: 'InferencePro',  specterQuery: 'Replicate' },
-  'GPdnT3tRBm6RaMz1E4PKBYvY7RdtNvb1KEmRsLBJJrqA': { displayName: 'ComputeHub',    specterQuery: 'Together AI' },
-  '2noknFMELsRzWaFhpBrqJnxXmvZsQn1gGNmLuE5RL7E9': { displayName: 'NeuralEdge',    specterQuery: 'Perplexity' },
+  'Hoh7fqnGfuvpHzMhVEoP5K8qfcuVNSGFnJoLTBMLbdYw': { displayName: 'Replicate',    specterQuery: 'Replicate' },
+  'GPdnT3tRBm6RaMz1E4PKBYvY7RdtNvb1KEmRsLBJJrqA': { displayName: 'Together AI',  specterQuery: 'Together AI' },
+  '2noknFMELsRzWaFhpBrqJnxXmvZsQn1gGNmLuE5RL7E9': { displayName: 'Perplexity',   specterQuery: 'Perplexity' },
 }
 
 // ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ function buildMockData(): Record<string, ProviderIntel> {
     {
       pubkey: 'Hoh7fqnGfuvpHzMhVEoP5K8qfcuVNSGFnJoLTBMLbdYw',
       data: {
-        display_name: 'InferencePro', specter_name: 'Replicate',
+        display_name: 'Replicate', specter_name: 'Replicate',
         domain: 'replicate.com',
         tagline: 'Run AI in the cloud',
         founded_year: 2019, hq_city: 'San Francisco', hq_country: 'US',
@@ -54,7 +54,7 @@ function buildMockData(): Record<string, ProviderIntel> {
     {
       pubkey: 'GPdnT3tRBm6RaMz1E4PKBYvY7RdtNvb1KEmRsLBJJrqA',
       data: {
-        display_name: 'ComputeHub', specter_name: 'Together AI',
+        display_name: 'Together AI', specter_name: 'Together AI',
         domain: 'together.ai',
         tagline: 'The AI acceleration cloud',
         founded_year: 2022, hq_city: 'San Francisco', hq_country: 'US',
@@ -66,7 +66,7 @@ function buildMockData(): Record<string, ProviderIntel> {
     {
       pubkey: '2noknFMELsRzWaFhpBrqJnxXmvZsQn1gGNmLuE5RL7E9',
       data: {
-        display_name: 'NeuralEdge', specter_name: 'Perplexity',
+        display_name: 'Perplexity AI', specter_name: 'Perplexity AI',
         domain: 'perplexity.ai',
         tagline: 'The answer engine',
         founded_year: 2022, hq_city: 'San Francisco', hq_country: 'US',
@@ -101,17 +101,23 @@ interface SpecterSearchResult {
 
 interface SpecterCompanyDetail {
   id: string
-  name: string
+  // Specter detail endpoint uses organization_name, not name
+  organization_name?: string
+  name?: string
+  website?: { domain?: string; url?: string }
   domain?: string
   description?: string
   tagline?: string
   founded_year?: number
   operating_status?: string
   employee_count?: number
-  hq?: { city?: string; country?: string }
+  hq?: { city?: string; country?: string; state?: string }
   funding?: {
-    total_funding_amount_usd?: number
-    no_of_funding_rounds?: number
+    // Specter uses total_funding_usd and round_count (not the names in the plan)
+    total_funding_usd?: number
+    total_funding_amount_usd?: number  // fallback alias
+    round_count?: number
+    no_of_funding_rounds?: number      // fallback alias
   }
 }
 
@@ -140,18 +146,32 @@ function buildProviderIntel(
   displayName: string,
   detail: SpecterCompanyDetail,
 ): ProviderIntel {
+  // Specter's detail endpoint uses organization_name; search uses name
+  const specterName = detail.organization_name ?? detail.name ?? ''
+  // Domain is nested under website.domain in the detail response
+  const domain = detail.website?.domain ?? detail.domain ?? ''
+  // Funding fields use different names than the hackathon plan specified
+  const fundingTotal =
+    detail.funding?.total_funding_usd ??
+    detail.funding?.total_funding_amount_usd ??
+    null
+  const fundingRounds =
+    detail.funding?.round_count ??
+    detail.funding?.no_of_funding_rounds ??
+    null
+
   const partial: Omit<ProviderIntel, 'reliability_score'> = {
     pubkey,
     display_name: displayName,
-    specter_name: detail.name,
-    domain: detail.domain ?? '',
+    specter_name: specterName,
+    domain,
     tagline: detail.tagline ?? '',
     founded_year: detail.founded_year ?? null,
     hq_city: detail.hq?.city ?? '',
     hq_country: detail.hq?.country ?? '',
     employee_count: detail.employee_count ?? null,
-    funding_total_usd: detail.funding?.total_funding_amount_usd ?? null,
-    funding_rounds: detail.funding?.no_of_funding_rounds ?? null,
+    funding_total_usd: fundingTotal,
+    funding_rounds: fundingRounds,
     operating_status: detail.operating_status ?? null,
     description: detail.description ?? '',
   }
@@ -162,9 +182,12 @@ function buildProviderIntel(
 // Route handler
 // ---------------------------------------------------------------------------
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: Request): Promise<NextResponse> {
+  const { searchParams } = new URL(req.url)
+  const bustCache = searchParams.get('bust') === '1'
+
   // Serve from cache if fresh
-  if (_cache && Date.now() < _cache.expiresAt) {
+  if (!bustCache && _cache && Date.now() < _cache.expiresAt) {
     return NextResponse.json({
       providers: _cache.providers,
       enriched_at: _cache.expiresAt - CACHE_TTL_MS,

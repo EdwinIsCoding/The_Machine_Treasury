@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { PaymentEvent, ComplianceEvent } from '@/lib/solana/types'
-import { loadWalletData, type DataSource } from '@/lib/data-source'
+import { type DataSource } from '@/lib/data-source'
 import { generateMockData } from '@/lib/mock/generator'
 
 // ---------------------------------------------------------------------------
@@ -43,7 +43,19 @@ export const useWalletStore = create<WalletState>()((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
-      const data = await loadWalletData(WALLET_PUBKEY)
+      // Call our server-side API route to avoid browser rate limits on the
+      // public Solana devnet RPC. The route caches results for 30 seconds.
+      const params = WALLET_PUBKEY ? `?pubkey=${encodeURIComponent(WALLET_PUBKEY)}` : ''
+      const res = await fetch(`/api/solana/wallet${params}`)
+      if (!res.ok) throw new Error(`API ${res.status}`)
+      const data = await res.json() as {
+        paymentHistory: PaymentEvent[]
+        complianceHistory: ComplianceEvent[]
+        balance: number
+        txCount: number
+        source: DataSource
+        fetchedAt: number
+      }
       set({
         paymentHistory: data.paymentHistory,
         complianceHistory: data.complianceHistory,

@@ -13,9 +13,9 @@ import type { PaymentEvent, ComplianceEvent } from '@/lib/solana/types'
 
 // Three realistic-looking Solana pubkeys for providers
 const PROVIDERS = {
-  A: 'Hoh7fqnGfuvpHzMhVEoP5K8qfcuVNSGFnJoLTBMLbdYw', // InferencePro  (~60%)
-  B: 'GPdnT3tRBm6RaMz1E4PKBYvY7RdtNvb1KEmRsLBJJrqA', // ComputeHub    (~30%)
-  C: '2noknFMELsRzWaFhpBrqJnxXmvZsQn1gGNmLuE5RL7E9', // NeuralEdge    (~10%)
+  A: 'Hoh7fqnGfuvpHzMhVEoP5K8qfcuVNSGFnJoLTBMLbdYw', // Replicate   (~60%)
+  B: 'GPdnT3tRBm6RaMz1E4PKBYvY7RdtNvb1KEmRsLBJJrqA', // Together AI (~30%)
+  C: '2noknFMELsRzWaFhpBrqJnxXmvZsQn1gGNmLuE5RL7E9', // Perplexity  (~10%)
 }
 
 // Static agent pubkey used when hardware wallet env var is not set
