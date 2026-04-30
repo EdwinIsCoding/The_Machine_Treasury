@@ -1,49 +1,45 @@
 import { create } from 'zustand'
 import type { PaymentEvent, ComplianceEvent } from '@/lib/solana/types'
 import { loadWalletData, type DataSource } from '@/lib/data-source'
+import { generateMockData } from '@/lib/mock/generator'
 
 // ---------------------------------------------------------------------------
 // State shape
 // ---------------------------------------------------------------------------
 
 interface WalletState {
-  // Data
   paymentHistory: PaymentEvent[]
   complianceHistory: ComplianceEvent[]
   balance: number    // lamports
   txCount: number
   dataSource: DataSource
   fetchedAt: number | null
-
-  // UI state
   isLoading: boolean
   error: string | null
-
-  // Actions
   refresh: () => Promise<void>
 }
 
 // ---------------------------------------------------------------------------
-// Store
+// Pre-populate with mock data so the first render always has content.
+// refresh() will attempt Devnet and overwrite with live or fresh mock data.
 // ---------------------------------------------------------------------------
 
-const WALLET_PUBKEY =
-  process.env.NEXT_PUBLIC_HARDWARE_WALLET ?? ''
+const WALLET_PUBKEY = process.env.NEXT_PUBLIC_HARDWARE_WALLET ?? ''
+
+const _seed = generateMockData(WALLET_PUBKEY || undefined)
 
 export const useWalletStore = create<WalletState>()((set, get) => ({
-  paymentHistory: [],
-  complianceHistory: [],
-  balance: 0,
-  txCount: 0,
-  dataSource: 'mock',
-  fetchedAt: null,
+  paymentHistory: _seed.paymentHistory,
+  complianceHistory: _seed.complianceHistory,
+  balance: _seed.balance,
+  txCount: _seed.txCount,
+  dataSource: 'mock' as DataSource,
+  fetchedAt: Date.now(),
   isLoading: false,
   error: null,
 
   refresh: async () => {
-    // Prevent concurrent refreshes
     if (get().isLoading) return
-
     set({ isLoading: true, error: null })
 
     try {
@@ -58,7 +54,6 @@ export const useWalletStore = create<WalletState>()((set, get) => ({
         isLoading: false,
       })
     } catch (err) {
-      // loadWalletData never throws (mock always succeeds), but guard anyway
       const message = err instanceof Error ? err.message : 'Unknown error'
       console.error('[wallet-store] refresh failed:', message)
       set({ isLoading: false, error: message })
